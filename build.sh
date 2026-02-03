@@ -1,5 +1,8 @@
-#!/bin/zsh
-
+#!/bin/bash
 set -xe
 
-clang -g -Wall -O3 -D_DEFAULT_SOURCE qq.c -o qq 
+cc -g -Wall -O3 -fPIC -D_DEFAULT_SOURCE -c qq.c -o qq.o
+
+ar rcs libqq.a qq.o
+
+cc -g -Wall -O3 qq_driver.c -L. -lqq -o qq

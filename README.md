@@ -15,7 +15,9 @@ Qq is a lightweight, high-performance compression tool written in C. It serves a
 Qq is designed to be compiled with `clang` or `gcc`. No external libraries are required.
 
 ```bash
-clang -O3 -Wall main.c -o qq
+./build.sh
+./test.sh
+./cleanup.sh  # if you don't want the demo artifacts hanging around
 ```
 
 ## Usage
@@ -67,4 +69,4 @@ The QQX3 format is a binary stream structured as follows:
 
 ## Disclaimer
 
-This software was developed as an educational "rival" implementation to correct algorithmic deficiencies in Dr.Jonas Birch's recent video "Coding a WINZIP file compressor in C" (https://www.youtube.com/watch?v=vLPSSeTD9ac). While it includes safety checks -- this has not been tested in production environemtns or anything so -- caveat emptor.
+This software was developed as an educational "rival" implementation to correct algorithmic deficiencies in Dr.Jonas Birch's recent video "Coding a WINZIP file compressor in C" (https://www.youtube.com/watch?v=vLPSSeTD9ac). While it includes safety checks -- this has not been tested in production environemtns or anything so, file meta-data isn't really a thing yet either so I hope you remember what you called your file before compressing it 🥴 -- caveat emptor.

@@ -2,4 +2,4 @@
 
 set -xe
 
-clang -g -Wall -O3 main.c -o qq 
+clang -g -Wall -O3 -D_DEFAULT_SOURCE qq.c -o qq 

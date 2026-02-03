@@ -3,7 +3,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/types.h>
+
+#ifdef __APPLE__
 #include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
 
 // --- CONSTANTS ---
 const char QQ_SIGNATURE[4] = {'Q', 'Q', 'X', '3'};
@@ -32,8 +37,17 @@ uint32_t compute_crc32(const uint8_t *data, size_t n_bytes) {
 
 uint64_t get_safe_ram_limit() {
     uint64_t memsize = 0;
+#ifdef __APPLE__
     size_t len = sizeof(memsize);
     if (sysctlbyname("hw.memsize", &memsize, &len, NULL, 0) < 0) return 0;
+#elif defined(__linux__)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (pages < 0 || page_size < 0) return 0;
+    memsize = (uint64_t)pages * (uint64_t)page_size;
+#else
+    return 0; // Fallback for other OS
+#endif
     return (uint64_t)(memsize * 0.7);
 }
 

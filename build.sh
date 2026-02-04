@@ -1,8 +1,16 @@
 #!/bin/bash
-set -xe
+# Kyu Archiver Build Script
+echo "Building Kyu Archiver (QQX5)..."
+clang -g -Wall -Wextra -std=c99 \
+    core.c \
+    monocypher.c \
+    driver.c \
+    -I./include \
+    -o kyu
 
-cc -g -Wall -O3 -fPIC -D_DEFAULT_SOURCE -c qq.c -o qq.o
-
-ar rcs libqq.a qq.o
-
-cc -g -Wall -O3 qq_driver.c -L. -lqq -o qq
+if [ $? -eq 0 ]; then
+    echo "Build Successful: ./kyu"
+else
+    echo "Build Failed."
+    exit 1
+fi

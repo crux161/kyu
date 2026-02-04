@@ -1,8 +1,21 @@
-#!/bin/zsh 
+#!/bin/bash
+# Kyu Integrity Test
+./build.sh
+echo "Testing Large File Streaming..."
+# Create a 100MB test file if it doesn't exist
+if [ ! -f "big.txt" ]; then
+    head -c 100M </dev/urandom >big.txt
+fi
 
-time ./qq -c ./big.txt ./big.qq
-time ./qq -d ./big.qq ./big_q.txt
-ls -lah *.qq *.txt && \
-diff big.txt big_q.txt && \
-sha256sum ./big.txt && \
-sha256sum ./big_q.txt
+# Test Compression and Encryption
+./kyu -c big.txt big.kyu
+# Test Decryption and Decompression
+./kyu -d big.kyu big_restored.txt
+
+# Verify Integrity
+if cmp -s big.txt big_restored.txt; then
+    echo "PASS: Data integrity verified."
+else
+    echo "FAIL: Data mismatch detected."
+    exit 1
+fi

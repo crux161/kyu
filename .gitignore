@@ -5,6 +5,9 @@ kyu
 big.kyu
 big_restored.txt
 
+.*
+._*
+
 # Object files
 *.o
 *.ko

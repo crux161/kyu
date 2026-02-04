@@ -17,7 +17,6 @@
 #define KEY_SIZE 32
 #define SALT_SIZE 16
 
-/* --- Manifest Structure (Serialized) --- */
 #define MANIFEST_SIZE (4 + 8 + 8 + 256)
 
 typedef struct {
@@ -33,7 +32,6 @@ typedef struct {
     uint8_t salt[SALT_SIZE];
 } kyu_crypto;
 
-/* --- Helpers --- */
 
 static void increment_nonce(uint8_t *nonce) {
     for (int i = 0; i < 8; i++) {
@@ -89,13 +87,11 @@ static void derive_key(const char *pass, uint8_t *salt, uint8_t *key) {
     free(work_area);
 }
 
-/* --- Serialization Helpers --- */
 static void pack_u32(uint8_t *b, uint32_t v) { memcpy(b, &v, 4); }
 static void pack_u64(uint8_t *b, uint64_t v) { memcpy(b, &v, 8); }
 static uint32_t unpack_u32(const uint8_t *b) { uint32_t v; memcpy(&v, b, 4); return v; }
 static uint64_t unpack_u64(const uint8_t *b) { uint64_t v; memcpy(&v, b, 8); return v; }
 
-/* --- Main Driver --- */
 
 int main(int argc, char *argv[]) {
     if (argc < 4) {
@@ -118,7 +114,6 @@ int main(int argc, char *argv[]) {
     uint8_t *comp_buf = malloc(CHUNK_SIZE * 2);
 
     if (strcmp(mode, "-c") == 0) {
-        /* --- COMPRESS & ENCRYPT --- */
         
         struct stat st;
         if (stat(in_path, &st) != 0) { perror("Stat failed"); return 1; }
@@ -138,8 +133,6 @@ int main(int argc, char *argv[]) {
             int ret = kyu_compress_update(strm, io_buf, n_read, comp_buf, &n_comp);
             if (ret != KYU_SUCCESS) return 1;
             
-            /* FIX: Only write non-empty chunks. Empty chunks (n_comp=0) are
-               valid in streaming (buffering) but kill the decryptor which sees 0 as EOS. */
             if (n_comp > 0) {
                 uint32_t chunk_len = (uint32_t)n_comp;
                 fwrite(&chunk_len, 1, 4, f_out);
@@ -165,11 +158,9 @@ int main(int argc, char *argv[]) {
             increment_nonce(ctx.nonce);
         }
 
-        /* Write End-of-Stream Marker (Length 0) */
         uint32_t eos = 0;
         fwrite(&eos, 1, 4, f_out);
 
-        /* Create & Write Tail Manifest */
         uint8_t man_buf[MANIFEST_SIZE];
         memset(man_buf, 0, MANIFEST_SIZE);
         
@@ -191,7 +182,6 @@ int main(int argc, char *argv[]) {
         printf("Archived: %s (Original: %llu bytes)\n", base, (unsigned long long)st.st_size);
 
     } else if (strcmp(mode, "-d") == 0) {
-        /* --- DECRYPT & RESTORE --- */
         
         uint8_t sig[4];
         if (fread(sig, 1, 4, f_in) != 4 || memcmp(sig, "KYU5", 4)) {

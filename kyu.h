@@ -36,7 +36,6 @@ typedef struct {
     uint8_t  bit_buf;
     int      bit_count;
 
-    /* Decompression State Machine */
     int      state;
     int      phase;
     void* root;
@@ -44,7 +43,7 @@ typedef struct {
     
     uint32_t partial_val;
     int      partial_bits;
-    int32_t  match_dist;   /* FIX: Safe persistence for dist */
+    int32_t  match_dist;   
     
     size_t   bytes_needed;
     uint8_t  freq_buf[KYU_MAX_SYMBOLS * 4];

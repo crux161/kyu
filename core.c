@@ -16,12 +16,10 @@ typedef struct {
     int size; 
 } MinHeap;
 
-/* --- Deterministic Heap Helpers --- */
 
 static int compare_nodes(Node *a, Node *b) {
     if (a->freq < b->freq) return -1;
     if (a->freq > b->freq) return 1;
-    /* Strict Total Ordering: Use sequence ID when freqs are equal */
     return (a->seq < b->seq) ? -1 : 1;
 }
 
@@ -55,13 +53,13 @@ static Node* build_tree(uint32_t freqs[KYU_MAX_SYMBOLS]) {
     MinHeap h = { malloc(sizeof(Node*) * KYU_MAX_SYMBOLS * 2), 0 };
     if (!h.nodes) return NULL;
     
-    int next_seq = KYU_MAX_SYMBOLS + 1; /* Counter for internal nodes */
+    int next_seq = KYU_MAX_SYMBOLS + 1; 
 
     for (int i = 0; i < KYU_MAX_SYMBOLS; i++) {
         if (freqs[i] > 0) {
             Node *n = calloc(1, sizeof(Node));
             n->symbol = i; n->freq = freqs[i];
-            n->seq = i; /* Leaf tie-breaker */
+            n->seq = i; 
             push_heap(&h, n);
         }
     }
@@ -70,7 +68,7 @@ static Node* build_tree(uint32_t freqs[KYU_MAX_SYMBOLS]) {
         Node *p = calloc(1, sizeof(Node));
         p->symbol = -1; 
         p->freq = a->freq + b->freq;
-        p->seq = next_seq++; /* Internal tie-breaker */
+        p->seq = next_seq++; 
         p->left = a; p->right = b;
         push_heap(&h, p);
     }
@@ -104,7 +102,6 @@ static void write_bits_buf(uint8_t **p_out, size_t *p_rem, uint8_t *bit_buf, int
     }
 }
 
-/* --- Compression Logic --- */
 
 static int kyu_flush_block(kyu_stream *strm, uint8_t *out, size_t *out_len, int is_eof) {
     size_t rem = *out_len;
@@ -123,12 +120,10 @@ static int kyu_flush_block(kyu_stream *strm, uint8_t *out, size_t *out_len, int 
     memset(lens, 0, sizeof(lens));
     gen_codes(root, codes, lens, 0, 0);
 
-    /* Write Freq Table */
     if (rem < sizeof(strm->freqs)) { free_tree(root); return KYU_ERR_BUF_SMALL; }
     memcpy(cur, strm->freqs, sizeof(strm->freqs));
     cur += sizeof(strm->freqs); rem -= sizeof(strm->freqs);
 
-    /* Write Tokens */
     for (int i = 0; i < strm->token_count; i++) {
         Token t = strm->tokens[i];
         if (rem < 8) { free_tree(root); return KYU_ERR_BUF_SMALL; }
@@ -140,7 +135,6 @@ static int kyu_flush_block(kyu_stream *strm, uint8_t *out, size_t *out_len, int 
         }
     }
 
-    /* Bit Flush */
     if (strm->bit_count > 0) {
         if (rem < 1) { free_tree(root); return KYU_ERR_BUF_SMALL; }
         *cur++ = strm->bit_buf;
@@ -202,14 +196,10 @@ int kyu_compress_update(kyu_stream *strm, const uint8_t *in, size_t in_len, uint
                      size_t match_idx = (size_t)(stored_val - 1);
                      
                      while (i + len < in_len && len < 18) {
-                         /* FIX: Handle Overlap/RLE verification correctly */
                          uint8_t ref_byte;
                          if (len < dist) {
-                             /* Normal: Reference is in window history */
                              ref_byte = strm->window[(match_idx + len) & KYU_WINDOW_MASK];
                          } else {
-                             /* Overlap: Reference is in 'in' (what we just theoretically wrote) */
-                             /* This implements RLE check using the current buffer */
                              ref_byte = in[i + len - dist];
                          }
                          
@@ -250,7 +240,6 @@ int kyu_compress_end(kyu_stream *strm, uint8_t *out, size_t *out_len) {
     return KYU_SUCCESS;
 }
 
-/* --- Decompression Logic (Unchanged) --- */
 
 enum { ST_READ_FREQ, ST_DECODE };
 enum { PHASE_SYM, PHASE_DIST, PHASE_LEN };

@@ -1,7 +1,6 @@
 #!/bin/bash
-# Kyu Archiver Build Script
 echo "Building Kyu Archiver (QQX5)..."
-clang -g -Wall -Wextra -std=c99 \
+clang -g -Wall -Wextra -O3 -std=c99 \
     core.c \
     monocypher.c \
     driver.c \

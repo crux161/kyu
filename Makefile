@@ -43,6 +43,18 @@ ifeq ($(UNAME_S),Darwin)
     # macOS specific flags if needed
 endif
 
+# --- WASM Configuration ---
+EMCC = emcc
+WASM_OUT = libkyu.js
+# WASM Flags
+WASM_FLAGS = -O3 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
+             -s MODULARIZE=1 -s EXPORT_ES6=1 \
+	     -s ALLOW_TABLE_GROWTH=1 \
+             -s EXPORTED_FUNCTIONS='["_kyu_init", "_kyu_push", "_kyu_pull", "_malloc", "_free"]' \
+             -s EXPORTED_RUNTIME_METHODS='["cwrap", "getValue", "setValue", "HEAPU8", "addFunction"]'
+
+
+
 # --- Targets ---
 
 .PHONY: all release debug clean audit help dependencies fuzz
@@ -86,6 +98,10 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR) dependencies
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
+# New WASM build target
+wasm: core.c archive.c monocypher.c
+	$(EMCC) $(WASM_FLAGS) $^ -o $(WASM_OUT) -Iinclude
+
 # --- Dependency Management ---
 
 # Smart Dependency Check:
@@ -107,6 +123,7 @@ clean:
 	@echo "  [CLEAN] Removing build artifacts..."
 	@rm -rf $(BUILD_DIR) $(TARGET) $(TARGET).dSYM $(FUZZ_TARGET)
 	@rm -rf ./*.o
+	@emcc --clear-cache
 
 # Clean everything including vendored files
 distclean: clean

@@ -17,10 +17,11 @@
 #define KYU_ERR_IO           -6
 #define KYU_ERR_BAD_ARG      -7
 
+/* Constants matching core.c logic */
 #define KYU_WINDOW_SIZE      32768
 #define KYU_WINDOW_MASK      32767
 #define KYU_MAX_TOKENS       16384
-#define KYU_MAX_SYMBOLS      259 
+#define KYU_MAX_SYMBOLS      286   /* UPDATED: Matches Deflate/LZ77 symbol count */
 #define KYU_SYM_MATCH        256
 #define KYU_SYM_EOF          257
 #define KYU_SYM_BLK_END      258
@@ -31,9 +32,6 @@ typedef struct {
 
 /**
  * @brief Compression/decompression stream state.
- *
- * This struct holds the rolling window, token buffers, and decode state.
- * It is header-coupled for performance and simplicity.
  */
 typedef struct {
     uint8_t  window[KYU_WINDOW_SIZE];
@@ -45,7 +43,9 @@ typedef struct {
     int      token_count;
     
     size_t   window_pos;
-    uint8_t  bit_buf;
+    
+    /* CRITICAL FIX: bit_buf must be 32-bit to handle shifting > 8 bits */
+    uint32_t bit_buf; 
     int      bit_count;
 
     int      state;
@@ -67,61 +67,12 @@ typedef struct {
     size_t   freq_len;
 } kyu_stream;
 
-/**
- * @brief Initialize a compression stream.
- *
- * @param[in,out] strm Stream state to initialize.
- * @return 0 on success, negative error code on failure.
- */
 int kyu_compress_init(kyu_stream *strm);
-
-/**
- * @brief Compress a chunk of input data.
- *
- * @param[in,out] strm Stream state.
- * @param[in]     in Input buffer.
- * @param[in,out] in_len Input: available bytes. Output: bytes consumed.
- * @param[out]    out Output buffer.
- * @param[in,out] out_len Input: capacity of out. Output: bytes written.
- * @return 0 on success, negative error code on failure.
- */
 int kyu_compress_update(kyu_stream *strm, const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len);
-
-/**
- * @brief Finish compression and flush final block.
- *
- * @param[in,out] strm Stream state.
- * @param[out]    out Output buffer.
- * @param[in,out] out_len Input: capacity of out. Output: bytes written.
- * @return 0 on success, negative error code on failure.
- */
 int kyu_compress_end(kyu_stream *strm, uint8_t *out, size_t *out_len);
 
-/**
- * @brief Initialize a decompression stream.
- *
- * @param[in,out] strm Stream state to initialize.
- * @return 0 on success, negative error code on failure.
- */
 int kyu_decompress_init(kyu_stream *strm);
-
-/**
- * @brief Decompress a chunk of input data.
- *
- * @param[in,out] strm Stream state.
- * @param[in]     in Input buffer.
- * @param[in,out] in_len Input: available bytes. Output: bytes consumed.
- * @param[out]    out Output buffer.
- * @param[in,out] out_len Input: capacity of out. Output: bytes written.
- * @return 0 on success, negative error code on failure.
- */
 int kyu_decompress_update(kyu_stream *strm, const uint8_t *in, size_t *in_len, uint8_t *out, size_t *out_len);
-
-/**
- * @brief Free internal decode resources held by the stream.
- *
- * @param[in,out] strm Stream state.
- */
 void kyu_decompress_free(kyu_stream *strm);
 
 #endif

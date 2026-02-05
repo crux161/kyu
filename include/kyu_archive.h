@@ -6,14 +6,12 @@
 #define KYU_ARCHIVE_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Archive metadata stored in the tail manifest.
- */
 typedef struct {
     uint32_t mode;
     uint64_t mtime;
@@ -21,16 +19,10 @@ typedef struct {
     char name[256];
 } kyu_manifest;
 
-/**
- * @brief KDF algorithm identifiers (compatible with Monocypher).
- */
 #define KYU_KDF_ARGON2_D  0
 #define KYU_KDF_ARGON2_I  1
 #define KYU_KDF_ARGON2_ID 2
 
-/**
- * @brief Key-derivation parameters for archive encryption.
- */
 typedef struct {
     uint32_t algorithm;
     uint32_t nb_blocks;
@@ -38,83 +30,46 @@ typedef struct {
     uint32_t nb_lanes;
 } kyu_kdf_params;
 
-/**
- * @brief Default KDF parameters (Argon2id, 1MB, 3 passes, 1 lane).
- */
 extern const kyu_kdf_params kyu_kdf_default_params;
 
+/* --- Callback Type Definition (Must be before usage) --- */
 /**
- * @brief Compress and encrypt a file into a QQX5 archive (default KDF).
- *
- * @param[in]  in_path Input file path.
- * @param[in]  out_path Output archive path.
- * @param[in]  password Password for key derivation.
- * @param[out] manifest_out Optional output manifest (can be NULL).
- * @return 0 on success, negative error code on failure.
+ * @brief Generic callback for processing output data.
+ * @return 0 on success, error code otherwise.
  */
-int kyu_archive_compress_file(const char *in_path,
-                              const char *out_path,
-                              const char *password,
-                              kyu_manifest *manifest_out);
+typedef int (*kyu_write_fn)(void *ctx, const void *buf, size_t len);
 
-/**
- * @brief Compress and encrypt a file with custom KDF parameters.
- *
- * @param[in]  in_path Input file path.
- * @param[in]  out_path Output archive path.
- * @param[in]  password Password for key derivation.
- * @param[in]  kdf_params Optional KDF params (NULL uses defaults).
- * @param[out] manifest_out Optional output manifest (can be NULL).
- * @return 0 on success, negative error code on failure.
- */
-int kyu_archive_compress_file_ex(const char *in_path,
-                                 const char *out_path,
-                                 const char *password,
-                                 const kyu_kdf_params *kdf_params,
-                                 kyu_manifest *manifest_out);
+/* --- Incremental Write API --- */
+typedef struct kyu_writer_t kyu_writer;
 
-/**
- * @brief Decrypt and decompress a QQX5 archive to a file (default KDF).
- *
- * @param[in]  in_path Input archive path.
- * @param[in]  out_path Output file path.
- * @param[in]  password Password for key derivation.
- * @param[out] manifest_out Optional output manifest (can be NULL).
- * @param[out] manifest_status Optional status:
- *             1 = manifest decrypted and parsed
- *             0 = manifest missing
- *            -1 = manifest present but authentication failed
- * @return 0 on success, negative error code on failure.
- */
-int kyu_archive_decompress_file(const char *in_path,
-                                const char *out_path,
+kyu_writer* kyu_writer_init(FILE *out_stream, const char *password, const kyu_kdf_params *kdf_params);
+int kyu_writer_update(kyu_writer *writer, const void *data, size_t len);
+int kyu_writer_finalize(kyu_writer *writer, const kyu_manifest *manifest_template);
+void kyu_writer_free(kyu_writer *writer);
+
+/* --- Stream API --- */
+
+int kyu_archive_compress_stream(FILE *in_stream,
+                                FILE *out_stream,
                                 const char *password,
-                                kyu_manifest *manifest_out,
-                                int *manifest_status);
+                                const kyu_kdf_params *kdf_params,
+                                const kyu_manifest *manifest_template,
+                                kyu_manifest *manifest_out);
 
-/**
- * @brief Decrypt and decompress a QQX5 archive with custom KDF parameters.
- *
- * @param[in]  in_path Input archive path.
- * @param[in]  out_path Output file path.
- * @param[in]  password Password for key derivation.
- * @param[in]  kdf_params Optional KDF params (NULL uses defaults).
- * @param[out] manifest_out Optional output manifest (can be NULL).
- * @param[out] manifest_status Optional status:
- *             1 = manifest decrypted and parsed
- *             0 = manifest missing
- *            -1 = manifest present but authentication failed
- * @return 0 on success, negative error code on failure.
- */
-int kyu_archive_decompress_file_ex(const char *in_path,
-                                   const char *out_path,
-                                   const char *password,
-                                   const kyu_kdf_params *kdf_params,
-                                   kyu_manifest *manifest_out,
-                                   int *manifest_status);
+/* UPDATED SIGNATURE: Uses generic callback instead of FILE* */
+int kyu_archive_decompress_stream(FILE *in_stream,
+                                  kyu_write_fn write_fn,
+                                  void *write_ctx,
+                                  const char *password,
+                                  const kyu_kdf_params *kdf_params,
+                                  kyu_manifest *manifest_out,
+                                  int *manifest_status);
+
+/* --- Legacy Wrappers --- */
+int kyu_archive_compress_file(const char *in, const char *out, const char *pass, kyu_manifest *man);
+int kyu_archive_decompress_file(const char *in, const char *out, const char *pass, kyu_manifest *man, int *st);
 
 #ifdef __cplusplus
 }
 #endif
-
 #endif

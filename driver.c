@@ -10,214 +10,294 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <limits.h>
+#include <dirent.h>
 
 #include "kyu.h"
 #include "kyu_archive.h"
 
-/* Helper for secure password input */
+/* Helper included directly for simplified build */
 #include "password_utils.c"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
+/* --- External USTAR Prototypes --- */
+int kyu_ustar_write_header(kyu_writer *w, const char *path, const struct stat *st);
+int kyu_ustar_write_padding(kyu_writer *w, size_t size);
+int kyu_ustar_write_end(kyu_writer *w);
+int kyu_ustar_list_callback(void *ctx, const void *buf, size_t len);
+
+/* --- Internal Types --- */
+
+typedef struct {
+    uint64_t bytes_to_skip;
+    uint8_t buffer[512];
+    size_t buf_pos;
+} kyu_lister_ctx;
+
+/* --- Helpers --- */
+
 static void print_usage(const char *prog) {
-    printf("Kyu Archiver (QQX5)\n");
-    printf("Usage: %s -c|-d <input_file> [output_file] [password]\n", prog);
-    printf("   Or: %s -c|-d <input_file> -o <output_file> [password]\n", prog);
-    printf("\n");
-    printf("Options:\n");
-    printf("  -c <file>   Compress file\n");
-    printf("  -d <file>   Decompress archive\n");
-    printf("  -o <file>   Explicitly specify output filename\n");
-    printf("\n");
-    printf("Examples:\n");
-    printf("  %s -c big.txt              -> Creates big.txt.kyu (prompts for pass)\n", prog);
-    printf("  %s -c big.txt archive.kyu  -> Creates archive.kyu (prompts for pass)\n", prog);
+    fprintf(stderr, "Kyu Archiver (QQX5)\n");
+    fprintf(stderr, "Usage: %s -c|-d|-l [options] [input] [output]\n", prog);
+    fprintf(stderr, "\nOptions:\n");
+    fprintf(stderr, "  -c          Compress (File or Directory)\n");
+    fprintf(stderr, "  -d          Decompress\n");
+    fprintf(stderr, "  -l          List contents\n");
+    fprintf(stderr, "  -o <file>   Output file (optional)\n");
 }
 
 static const char *err_str(int code) {
     switch (code) {
         case KYU_SUCCESS: return "OK";
         case KYU_ERR_MEMORY: return "Out of memory";
-        case KYU_ERR_INVALID_HDR: return "Invalid header or format";
+        case KYU_ERR_INVALID_HDR: return "Invalid header";
         case KYU_ERR_CRC_MISMATCH: return "Authentication failed";
-        case KYU_ERR_BUF_SMALL: return "Buffer too small";
         case KYU_ERR_DATA_CORRUPT: return "Corrupted data";
         case KYU_ERR_IO: return "I/O error";
-        case KYU_ERR_BAD_ARG: return "Invalid argument";
         default: return "Unknown error";
     }
 }
 
-static void apply_manifest(const char *out_path, const kyu_manifest *man) {
-    chmod(out_path, man->mode & 0777);
-    struct timeval times[2];
-    times[0].tv_sec = (time_t)man->mtime;
-    times[0].tv_usec = 0;
-    times[1].tv_sec = (time_t)man->mtime;
-    times[1].tv_usec = 0;
-    utimes(out_path, times);
-}
-
 /**
- * @brief Intelligently derive output filename from input.
+ * @brief Intelligently derive output filename in Current Working Directory.
  */
-static void derive_filename(const char *in, char *out, size_t max, int is_compress) {
-    if (is_compress) {
-        snprintf(out, max, "%s.kyu", in);
-    } else {
-        size_t len = strlen(in);
-        if (len > 4 && strcmp(in + len - 4, ".kyu") == 0) {
-            size_t new_len = len - 4;
-            if (new_len >= max) new_len = max - 1;
-            strncpy(out, in, new_len);
-            out[new_len] = '\0';
+static void derive_filename(const char *in, char *out, size_t max, int is_comp, int is_dir_input) {
+    /* 1. Clean path (strip trailing slash) */
+    char clean_in[PATH_MAX];
+    strncpy(clean_in, in, PATH_MAX - 1);
+    clean_in[PATH_MAX - 1] = '\0';
+    size_t len = strlen(clean_in);
+    if (len > 1 && clean_in[len - 1] == '/') clean_in[len - 1] = '\0';
+
+    /* 2. Extract Basename (Strip directories from input path) */
+    const char *base = strrchr(clean_in, '/');
+    if (base) base++; /* Move past slash */
+    else base = clean_in;
+
+    if (is_comp) {
+        if (is_dir_input) {
+            snprintf(out, max, "%s.tar.kyu", base);
         } else {
-            snprintf(out, max, "%s.dec", in);
+            snprintf(out, max, "%s.kyu", base);
+        }
+    } else {
+        /* Decompression: Also default to CWD unless -o specified */
+        size_t base_len = strlen(base);
+        if (base_len > 8 && !strcmp(base+base_len-8, ".tar.kyu")) {
+            snprintf(out, max, "%.*s.tar", (int)(base_len-8), base);
+        } else if (base_len > 4 && !strcmp(base+base_len-4, ".kyu")) {
+            snprintf(out, max, "%.*s", (int)(base_len-4), base);
+        } else {
+            snprintf(out, max, "%s.dec", base);
         }
     }
+}
+
+static int file_write_wrapper(void *ctx, const void *buf, size_t len) {
+    FILE *f = (FILE*)ctx;
+    return (fwrite(buf, 1, len, f) == len) ? KYU_SUCCESS : KYU_ERR_IO;
+}
+
+static int walk_dir(kyu_writer *w, const char *base_path, const char *rel_path) {
+    char full_path[PATH_MAX];
+    if (rel_path[0]) snprintf(full_path, PATH_MAX, "%s/%s", base_path, rel_path);
+    else snprintf(full_path, PATH_MAX, "%s", base_path);
+
+    DIR *d = opendir(full_path);
+    if (!d) { perror(full_path); return -1; }
+
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
+
+        char entry_rel[PATH_MAX];
+        char entry_full[PATH_MAX];
+
+        if (rel_path[0]) snprintf(entry_rel, PATH_MAX, "%s/%s", rel_path, ent->d_name);
+        else snprintf(entry_rel, PATH_MAX, "%s", ent->d_name);
+
+        snprintf(entry_full, PATH_MAX, "%s/%s", base_path, entry_rel);
+
+        struct stat st;
+        if (lstat(entry_full, &st) != 0) { perror(entry_full); continue; }
+
+        if (kyu_ustar_write_header(w, entry_rel, &st) != KYU_SUCCESS) {
+            closedir(d); return -1;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            if (walk_dir(w, base_path, entry_rel) != 0) { closedir(d); return -1; }
+        } else if (S_ISREG(st.st_mode)) {
+            FILE *f = fopen(entry_full, "rb");
+            if (f) {
+                uint8_t buf[16384];
+                size_t n;
+                while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+                    if (kyu_writer_update(w, buf, n) != KYU_SUCCESS) {
+                        fclose(f); closedir(d); return -1;
+                    }
+                }
+                fclose(f);
+                kyu_ustar_write_padding(w, (size_t)st.st_size);
+            }
+        }
+    }
+    closedir(d);
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        print_usage(argv[0]);
-        return 1;
-    }
+    if (argc < 2) { print_usage(argv[0]); return 1; }
 
     const char *mode = argv[1];
-    const char *in_path = NULL;
-    const char *out_path_arg = NULL;
+    const char *in_arg = NULL;
+    const char *out_arg = NULL;
     const char *pass_arg = NULL;
-    
-    char auto_out_path[PATH_MAX];
-    const char *final_out_path = NULL;
+    char auto_out[PATH_MAX] = {0};
 
-    // --- 1. Separate Flags from Positional Arguments ---
-    const char *pos_args[8];
-    int pos_count = 0;
-
-    for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
-            if (i + 1 < argc) {
-                out_path_arg = argv[++i];
-            } else {
-                fprintf(stderr, "Error: -o requires a filename.\n");
-                return 1;
-            }
+    const char *pos[8]; int pos_cnt = 0;
+    for (int i=2; i<argc; i++) {
+        if (!strcmp(argv[i], "-o")) {
+            if (++i < argc) out_arg = argv[i];
         } else {
-            if (pos_count < 8) pos_args[pos_count++] = argv[i];
+            if (pos_cnt < 8) pos[pos_cnt++] = argv[i];
+        }
+    }
+    if (pos_cnt > 0) in_arg = pos[0];
+    if (pos_cnt > 1 && !out_arg) out_arg = pos[1];
+    if (pos_cnt > 1 && out_arg) pass_arg = (pos_cnt > 2) ? pos[2] : NULL;
+    else if (pos_cnt > 2) pass_arg = pos[2];
+
+    int use_stdin = (!in_arg || strcmp(in_arg, "-") == 0);
+    int is_list_mode = (!strcmp(mode, "-l"));
+    int use_stdout = 0;
+    int is_dir_input = 0;
+    struct stat st_check;
+
+    if (!use_stdin && in_arg && stat(in_arg, &st_check) == 0 && S_ISDIR(st_check.st_mode)) {
+        is_dir_input = 1;
+    }
+
+    if (!is_list_mode) {
+        if (out_arg && strcmp(out_arg, "-") == 0) use_stdout = 1;
+        else if (!out_arg) {
+            if (use_stdin || !isatty(fileno(stdout))) use_stdout = 1;
+            else {
+                /* Auto-name in CWD */
+                derive_filename(in_arg, auto_out, PATH_MAX, !strcmp(mode, "-c"), is_dir_input);
+                out_arg = auto_out;
+                use_stdout = 0;
+            }
         }
     }
 
-    // --- 2. Assign Logical Variables ---
-    if (pos_count == 0) {
-        fprintf(stderr, "Error: No input file specified.\n");
-        return 1;
-    }
-    
-    in_path = pos_args[0];
-
-    if (out_path_arg) {
-        // Logic: kyu -c in -o out [pass]
-        if (pos_count > 1) pass_arg = pos_args[1];
-    } else {
-        // Logic: kyu -c in [out] [pass]
-        if (pos_count > 1) {
-            out_path_arg = pos_args[1];
-            if (pos_count > 2) pass_arg = pos_args[2];
-        }
-    }
-
-    // --- 3. Derive Output Filename (if needed) ---
-    if (out_path_arg) {
-        final_out_path = out_path_arg;
-    } else {
-        int is_compress = (strcmp(mode, "-c") == 0);
-        derive_filename(in_path, auto_out_path, sizeof(auto_out_path), is_compress);
-        final_out_path = auto_out_path;
-    }
-
-    // --- 4. Password Handling ---
-    char password[1024]; 
-    memset(password, 0, sizeof(password));
-
+    char password[1024] = {0};
     if (pass_arg) {
-        fprintf(stderr, "WARNING: Providing password via CLI is insecure (visible in history).\n");
-        strncpy(password, pass_arg, sizeof(password) - 1);
+        strncpy(password, pass_arg, sizeof(password)-1);
     } else {
-        // Secure Prompt (Default)
-        if (kyu_read_password_secure(password, sizeof(password), "Enter Password: ") != 0) {
-            fprintf(stderr, "Error reading password.\n");
-            return 1;
-        }
-        
-        // Confirm (Creation only)
-        if (strcmp(mode, "-c") == 0) {
-            char confirm[1024];
-            if (kyu_read_password_secure(confirm, sizeof(confirm), "Confirm Password: ") != 0) {
-                return 1;
-            }
-            if (strcmp(password, confirm) != 0) {
-                fprintf(stderr, "Error: Passwords do not match.\n");
-                memset(password, 0, sizeof(password)); 
-                memset(confirm, 0, sizeof(confirm));
-                return 1;
-            }
-            memset(confirm, 0, sizeof(confirm));
-        }
+        int confirm = (!strcmp(mode, "-c"));
+        if (kyu_get_password(password, sizeof(password), "Enter Password: ", confirm) != 0) return 1;
+        if (confirm && !kyu_password_check_strength(password)) return 1;
     }
 
-    // Enforce Policy (Creation only)
-    if (strcmp(mode, "-c") == 0) {
-        if (!kyu_password_check_strength(password)) {
-            memset(password, 0, sizeof(password));
-            return 1;
-        }
+    FILE *f_in = use_stdin ? stdin : fopen(in_arg, "rb");
+    if (!f_in && !use_stdin && !is_dir_input) { perror("Input"); return 1; }
+
+    FILE *f_out = NULL;
+    if (!is_list_mode) {
+        f_out = use_stdout ? stdout : fopen(out_arg, "wb");
+        if (!f_out) { perror("Output"); if(f_in) fclose(f_in); return 1; }
     }
 
-    // --- 5. Execution ---
-    printf("Input:  %s\n", in_path);
-    printf("Output: %s\n", final_out_path);
+    if (!use_stdout && !is_list_mode) {
+        printf("Processing: %s -> %s\n", is_dir_input ? in_arg : (use_stdin ? "STDIN" : in_arg), out_arg);
+    }
 
-    if (strcmp(mode, "-c") == 0) {
-        kyu_manifest manifest;
-        int ret = kyu_archive_compress_file(in_path, final_out_path, password, &manifest);
-        if (ret != KYU_SUCCESS) {
-            fprintf(stderr, "Archive failed: %s (%d)\n", err_str(ret), ret);
-            remove(final_out_path);
-            memset(password, 0, sizeof(password));
-            return 1;
-        }
-        printf("Archived: %s (Original: %llu bytes)\n",
-               manifest.name, (unsigned long long)manifest.size);
-    } 
-    else if (strcmp(mode, "-d") == 0) {
-        kyu_manifest manifest;
-        int manifest_status = 0;
-        int ret = kyu_archive_decompress_file(in_path, final_out_path, password, &manifest, &manifest_status);
-        if (ret != KYU_SUCCESS) {
-            fprintf(stderr, "Restore failed: %s (%d)\n", err_str(ret), ret);
-            remove(final_out_path);
-            memset(password, 0, sizeof(password));
-            return 1;
-        }
+    int ret = 0;
 
-        if (manifest_status == 1) {
-            printf("Restoring Metadata for: %s\n", manifest.name);
-            apply_manifest(final_out_path, &manifest);
-        } else if (manifest_status == -1) {
-            printf("SECURITY ALERT: Manifest Tampered!\n");
+    if (!strcmp(mode, "-c")) {
+        if (is_dir_input) {
+            if (f_in) fclose(f_in); 
+            
+            kyu_writer *w = kyu_writer_init(f_out, password, NULL);
+            if (w) {
+                char base_dir[PATH_MAX] = ".";
+                char root_name[PATH_MAX] = {0};
+                
+                char clean_in[PATH_MAX];
+                strncpy(clean_in, in_arg, PATH_MAX-1);
+                size_t len = strlen(clean_in);
+                if (len > 1 && clean_in[len-1] == '/') clean_in[len-1] = 0;
+
+                char *slash = strrchr(clean_in, '/');
+                if (slash) {
+                    *slash = 0;
+                    strncpy(base_dir, clean_in, PATH_MAX);
+                    strncpy(root_name, slash+1, PATH_MAX);
+                } else {
+                    strncpy(root_name, clean_in, PATH_MAX);
+                }
+
+                if (kyu_ustar_write_header(w, root_name, &st_check) == 0) {
+                    if (walk_dir(w, base_dir, root_name) == 0) {
+                        kyu_ustar_write_end(w);
+                        kyu_manifest man = {0};
+                        snprintf(man.name, 255, "%s.tar", root_name);
+                        man.mode = st_check.st_mode;
+                        man.mtime = (uint64_t)st_check.st_mtime;
+                        ret = kyu_writer_finalize(w, &man);
+                    } else ret = KYU_ERR_IO;
+                } else ret = KYU_ERR_IO;
+            }
         } else {
-            printf("Warning: No Manifest Found.\n");
+            kyu_manifest tmpl = {0};
+            if (!use_stdin && stat(in_arg, &st_check) == 0) {
+                tmpl.mode = st_check.st_mode;
+                tmpl.mtime = (uint64_t)st_check.st_mtime;
+                const char *b = strrchr(in_arg, '/');
+                strncpy(tmpl.name, b ? b+1 : in_arg, 255);
+            }
+            kyu_manifest man = {0};
+            ret = kyu_archive_compress_stream(f_in, f_out, password, NULL, &tmpl, &man);
         }
     } 
+    else if (!strcmp(mode, "-d")) {
+        kyu_manifest man = {0};
+        int status = 0;
+        ret = kyu_archive_decompress_stream(f_in, file_write_wrapper, f_out, password, NULL, &man, &status);
+        
+        if (ret == 0 && !use_stdout && status == 1) {
+            chmod(out_arg, man.mode & 0777);
+            struct timeval t[2] = { {(time_t)man.mtime, 0}, {(time_t)man.mtime, 0} };
+            utimes(out_arg, t);
+            printf("Restored: %s\n", man.name);
+        }
+        if (status == -1) fprintf(stderr, "SECURITY WARNING: Manifest auth failed.\n");
+    }
+    else if (!strcmp(mode, "-l")) {
+        kyu_lister_ctx lctx = {0};
+        kyu_manifest man = {0};
+        int status = 0;
+        ret = kyu_archive_decompress_stream(f_in, kyu_ustar_list_callback, &lctx, password, NULL, &man, &status);
+        if (ret == 0 && status == 1) {
+            printf("\nArchive Name: %s\nSize: %llu\n", man.name, (unsigned long long)man.size);
+        }
+    }
     else {
         print_usage(argv[0]);
-        memset(password, 0, sizeof(password));
-        return 1;
+        ret = KYU_ERR_BAD_ARG;
     }
 
+    if (f_in) fclose(f_in);
+    if (f_out) fclose(f_out);
     memset(password, 0, sizeof(password));
+    
+    if (ret != KYU_SUCCESS) {
+        fprintf(stderr, "Operation failed: %s (%d)\n", err_str(ret), ret);
+        if (!use_stdout && out_arg && !is_list_mode) remove(out_arg);
+        return 1;
+    }
     return 0;
 }

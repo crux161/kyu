@@ -1,121 +1,114 @@
-# Kyu Archiver (QQX5)
+# Kyu Archiver
 
-**Kyu** is a minimalist, cryptographically secure stream archiver designed for high-reliability data storage. It combines custom **LZ77 compression** with **Authenticated Encryption (AEAD)** to ensure that data is not just smaller, but mathematically tamper-proof.
+**Kyu** is a lightweight, secure, and streaming-capable archiver designed for the modern Unix ecosystem. It combines authenticated encryption (ChaCha20-Poly1305) with adaptive LZ77 compression in a format (QQX5) that is fully pipeline-friendly.
 
-Unlike standard tools (like `gzip` or `tar`), Kyu enforces a "Security First" pipeline: every byte of compressed data is authenticated via a Message Authentication Code (MAC) *before* the decompressor is allowed to touch it.
+Unlike standard tools, Kyu is designed to be **secure by default**, encrypting all data and metadata with modern cryptography while remaining compatible with standard Unix streams like `tar`.
 
-### 🛡️ Security Features
-* **Authenticated Encryption:** Uses **XChaCha20-Poly1305** (via [Monocypher](https://monocypher.org)).
-* **Gatekeeper Architecture:** MAC verification happens *before* decryption and decompression. Malicious/corrupted data is rejected instantly, preventing exploit chains in the decompression logic.
-* **Argon2 Key Derivation:** User passwords are hardened using **Argon2id** (1MB memory cost, 3 iterations) with 128-bit random salts (`arc4random` / `/dev/urandom`). The library exposes configurable KDF parameters via `kyu_kdf_params`.
-* **Replay Protection:** Enforces strict nonce incrementation per chunk.
-* **Fuzz-Tested:** The decompression core has passed over 20,000 fuzzing iterations (AFL++) with **0 crashes** and **0 memory violations** (ASan/UBSan verified).
+## Features
 
-### ⚡ Core Features
-* **Streaming Architecture:** Capable of archiving files larger than available RAM (TB+ scale).
-* **Deterministic Compression:** Custom LZ77 engine with a strictly deterministic Huffman Heap ensures reproducible archives across platforms.
-* **Tail Manifest:** Metadata (Filename, Permissions, Timestamp) is encrypted and appended to the *end* of the stream, allowing single-pass archiving.
+* **🔒 Secure:** Authenticated Encryption using ChaCha20-Poly1305 (via Monocypher). Keys derived via Argon2id.
+* **📂 Native Directory Support:** Can archive directories directly into USTAR format without external tools.
+* **⚡ Adaptive Compression:** Uses a custom LZ77 engine that automatically detects incompressible data (like git objects or images) to prevent file bloating.
+* **🌊 Stream Oriented:** Fully supports `stdin` and `stdout` piping. Can be used as a filter in shell scripts.
+* **📜 List Mode:** Securely inspect archive contents (filenames and sizes) without extracting or writing data to disk.
+* **🚀 Zero Dependencies:** Built with a minimal C99 codebase.
 
----
+## Building
 
-## Building Kyu
-
-Kyu requires a C99 compiler (`clang` or `gcc`). The cryptographic library (Monocypher) is included in the source tree.
+Kyu has no external dependencies beyond the standard C library.
 
 ```bash
-# Build the optimized binary
+# Build using Make
+make
+
+# Or manually
 ./build.sh
 ```
 
-This will also produce a static library (`libkyu.a`) for embedding in other programs.
-
-To build for security auditing (with AddressSanitizer and UndefinedBehaviorSanitizer):
-
-```bash
-# Build with debug symbols and sanitizers
-./audit.sh
-```
-
----
-
 ## Usage
 
-### 1. Archiving (Compress & Encrypt)
-Reads `big.txt`, compresses it, encrypts it with the password, and saves to `big.kyu`.
+Kyu automatically detects whether it should behave as a file archiver or a stream filter based on your inputs and terminal environment.
 
+### 1. Compressing Files & Directories
+
+**Single File:**
 ```bash
-./kyu -c big.txt big.kyu "MySecretPassword"
+./kyu -c secret.txt
+# Creates: secret.txt.kyu
+# Prompts for password securely.
 ```
-* *Note: The original filename, permissions (chmod), and timestamps are preserved in the encrypted manifest.*
 
-### 2. Restoring (Decrypt & Decompress)
-Reads the archive, verifies integrity, restores the file contents to `restored.txt`, and applies the original metadata.
-
+**Directory (Native):**
+Kyu includes a built-in USTAR writer. It creates standard TAR archives internally.
 ```bash
-./kyu -d big.kyu restored.txt "MySecretPassword"
+./kyu -c MyFolder/
+# Creates: MyFolder.tar.kyu
+# Contains the full directory tree.
 ```
 
----
-
-## Technical Specification: The QQX5 Format
-
-The QQX5 format is a binary stream designed for append-only writing.
-
-### 1. Super-Header
-The file begins with a plain-text signature and the cryptographic salt.
-```
-[ "KYU5" (4 bytes) ]  -- Magic Signature
-[ Salt   (16 bytes)]  -- Random salt for Argon2id
+**Custom Output:**
+```bash
+./kyu -c huge_log.log -o archive.kyu
 ```
 
-### 2. Data Chunks (Repeated)
-The file body consists of $N$ encrypted chunks.
-```
-[ Length (4 bytes, little-endian) ]  -- Length of the compressed ciphertext
-[ MAC    (16 bytes)]  -- Poly1305 Message Authentication Code
-[ Data   (N bytes) ]  -- XChaCha20 Encrypted (LZ77 Compressed Data)
-```
-* *Note: 0-byte data chunks are strictly forbidden in the stream to prevent EOS collision.*
+### 2. Decompression
 
-### 3. End-of-Stream Marker
-A special chunk indicating the end of the file data.
-```
-[ Length = 0 (4 bytes, little-endian) ]
+**Smart Restore:**
+Kyu automatically handles filenames and permissions.
+```bash
+./kyu -d MyFolder.tar.kyu
+# Restores: MyFolder.tar (which can then be extracted via tar)
+# Or if it was a single file, restores the original file.
 ```
 
-### 4. Tail Manifest
-The final chunk contains the encrypted metadata.
-```
-[ MAC    (16 bytes) ]
-[ Encrypted Payload (276 bytes) ]:
-    - Mode  (4 bytes, little-endian): File permissions (chmod)
-    - MTime (8 bytes, little-endian): Modification timestamp
-    - Size  (8 bytes, little-endian): Original file size
-    - Name  (256 bytes): Original filename
+**Stream Extraction (Best for Directories):**
+You can pipe the decompressed stream directly into `tar` to extract in one step without intermediate files.
+```bash
+./kyu -d MyFolder.tar.kyu | tar xf -
 ```
 
----
+### 3. Unix Streaming (Pipes)
 
-## Auditing & Verification
+Kyu works seamlessly with Unix pipes. This is ideal for backups or sending data over SSH.
 
-The codebase includes a `fuzzer.c` harness for use with AFL++ or libFuzzer.
+**Backup `/etc` securely:**
+```bash
+sudo tar cf - /etc | ./kyu -c > etc_backup.kyu
+```
 
-**To run the fuzzer:**
-1.  Install AFL++ (`brew install afl-plus-plus`).
-2.  Compile the fuzzer:
-    ```bash
-    afl-clang-fast -fsanitize=address -g kyu_core.c fuzzer.c monocypher.c -o kyu_fuzz -I./include
-    ```
-3.  Run:
-    ```bash
-    mkdir inputs && echo "seed" > inputs/test.txt
-    afl-fuzz -i inputs -o outputs -- ./kyu_fuzz @@
-    ```
+**Decrypt and extract on the fly:**
+```bash
+cat backup.kyu | ./kyu -d | tar xf -
+```
 
----
+### 4. Listing Contents
+
+You can inspect the contents of a `.tar.kyu` archive without extracting it.
+```bash
+./kyu -l MyFolder.tar.kyu
+```
+*Note: This decrypts the stream in memory to parse headers but discards the file bodies.*
+
+## Technical Details
+
+### Format (QQX5)
+The QQX5 format is chunk-based. Each chunk consists of:
+1.  **Length Header (4 bytes):** Encrypted length + "Compressed" flag bit.
+2.  **Auth Tag (16 bytes):** Poly1305 MAC.
+3.  **Payload (N bytes):** Encrypted data (ChaCha20).
+
+### Compression
+Kyu uses a custom **Greedy LZ77** implementation with:
+* 32KB Sliding Window.
+* Run-Length Encoding (RLE) for literals.
+* **Adaptive Mode:** Each 64KB block is compressed independently. If compression does not save space (e.g., on already compressed data), the block is stored raw to avoid expansion overhead.
+
+### Security
+* **Cipher:** ChaCha20-Poly1305 (IETF).
+* **KDF:** Argon2id (3 passes, 1024KB memory) to resist brute-force attacks.
+* **Nonce:** Incremented per chunk to prevent replay/reordering attacks.
 
 ## License
 
-This software is provided "as is", without warranty of any kind.
-* **Kyu Core:** MIT License.
-* **Monocypher:** [CC0-1.0 / 2-Clause BSD](https://monocypher.org).
+MIT License.
+Includes Monocypher (CC0/BSD-2-Clause).

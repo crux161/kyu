@@ -10,7 +10,7 @@ OPTIMIZE_OUTPUT_FOR_C  = YES
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
 
-INPUT                  = .
+INPUT                  = . include
 FILE_PATTERNS          = *.c *.h *.md
 RECURSIVE              = YES
 STRIP_FROM_PATH        = .

@@ -1,17 +1,14 @@
 #!/bin/bash
-echo "Building Kyu Archiver (QQX5)..."
+set -e
 
-CC=clang
-CFLAGS="-g -Wall -Wextra -O3 -std=c99 -I./include"
+# Setup dependencies
+#./vendor.sh
 
-$CC $CFLAGS -c core.c archive.c monocypher.c
-ar rcs libkyu.a core.o archive.o monocypher.o
+# Compile
+# Added ustar.c to the source list
+gcc -std=c99 -Wall -Wextra -Wpedantic \
+    -I./include \
+    core.c archive.c driver.c ustar.c monocypher.c \
+    -o kyu
 
-$CC $CFLAGS driver.c libkyu.a -o kyu
-
-if [ $? -eq 0 ]; then
-    echo "Build Successful: ./kyu (libkyu.a)"
-else
-    echo "Build Failed."
-    exit 1
-fi
+echo "Build complete: ./kyu"

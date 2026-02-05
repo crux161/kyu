@@ -8,8 +8,8 @@ if [ ! -f "big.txt" ]; then
     head -c 100M </dev/urandom >big.txt
 fi
 
-./kyu -c big.txt big.kyu $PASSWORD
-./kyu -d big.kyu big_restored.txt $PASSWORD
+./kyu -c big.txt 
+./kyu -d big.kyu 
 
 if cmp -s big.txt big_restored.txt; then
     echo "PASS: Data integrity verified."

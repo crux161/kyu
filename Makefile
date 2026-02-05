@@ -26,6 +26,7 @@ MONO_HDR    = $(INC_DIR)/monocypher.h
 SRCS        = $(SRC_DIR)/core.c \
               $(SRC_DIR)/archive.c \
               $(SRC_DIR)/driver.c \
+	      $(SRC_DIR)/ustar.c \
               $(MONO_SRC)
 
 # Object Files
@@ -102,6 +103,7 @@ update-deps:
 clean:
 	@echo "  [CLEAN] Removing build artifacts..."
 	@rm -rf $(BUILD_DIR) $(TARGET) $(TARGET).dSYM $(FUZZ_TARGET)
+	@rm -rf ./*.o
 
 # Clean everything including vendored files
 distclean: clean

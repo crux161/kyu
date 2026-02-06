@@ -20,6 +20,19 @@ fileInput.addEventListener('change', () => {
     }
 });
 
+function formatBytes(bytes, decimals = 2) {
+  if (bytes === 0) return '0 Bytes';
+
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+
 playBtn.addEventListener('click', async () => {
     try {
         playBtn.disabled = true;
@@ -46,10 +59,10 @@ playBtn.addEventListener('click', async () => {
         // 5. Apply the correct MIME type (Important for the browser player)
         // If your source was .mp4, use 'video/mp4'. If .webm, use 'video/webm'.
         const videoBlob = new Blob([rawBlob], { type: 'video/mp4' });
-        
+        let fileSize = formatBytes(videoBlob.size, 2); 
         const url = URL.createObjectURL(videoBlob);
 
-        console.log(`Decrypted Video Size: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`Decrypted Video Size: ${fileSize}`);
         
         video.src = url;
         video.play();

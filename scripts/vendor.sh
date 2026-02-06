@@ -8,6 +8,8 @@ MONOCYPHER_URL="https://monocypher.org/download/monocypher-${MONOCYPHER_VERSION}
 MONOCYPHER_SHA512_URL="https://monocypher.org/download/monocypher-${MONOCYPHER_VERSION}.tar.gz.sha512"
 MONOCYPHER_SHA512="${MONOCYPHER_SHA512:-}"
 
+KYU_ROOT="$(dirname ../$(pwd))"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp_dir="$(mktemp -d)"
 
@@ -80,7 +82,7 @@ src_root="${tmp_dir}/monocypher-${MONOCYPHER_VERSION}"
 
 mkdir -p "${script_dir}/include"
 
-cp "${src_root}/src/monocypher.c" "${script_dir}/monocypher.c"
-cp "${src_root}/src/monocypher.h" "${script_dir}/include/monocypher.h"
+cp "${src_root}/src/monocypher.c" "${KYU_ROOT}/src/monocypher.c"
+cp "${src_root}/src/monocypher.h" "${KYU_ROOT}/include/monocypher.h"
 
 echo "✅ Vendored Monocypher ${MONOCYPHER_VERSION} successfully."

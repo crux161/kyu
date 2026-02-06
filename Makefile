@@ -3,9 +3,10 @@
 
 # --- Configuration ---
 TARGET      = kyu
-SRC_DIR     = .
-INC_DIR     = ./include
-BUILD_DIR   = ./build
+SRC_DIR     = src
+INC_DIR     = include
+BUILD_DIR   = build
+SCRIPT_DIR  = scripts
 
 # Compiler Settings
 CC          ?= gcc
@@ -15,7 +16,6 @@ LDFLAGS     =
 # Fuzzer Settings
 FUZZ_CC     ?= afl-clang-fast
 FUZZ_TARGET = kyu_fuzz
-# Fuzzer uses core logic + fuzzer harness + crypto, but NOT the CLI driver
 FUZZ_SRCS   = $(SRC_DIR)/core.c $(SRC_DIR)/fuzzer.c $(SRC_DIR)/monocypher.c
 
 # Dependencies
@@ -23,7 +23,6 @@ MONO_SRC    = $(SRC_DIR)/monocypher.c
 MONO_HDR    = $(INC_DIR)/monocypher.h
 
 # Source Files for Main Binary
-# ADDED: password_utils.c
 SRCS        = $(SRC_DIR)/core.c \
               $(SRC_DIR)/archive.c \
               $(SRC_DIR)/driver.c \
@@ -34,119 +33,90 @@ SRCS        = $(SRC_DIR)/core.c \
 # Object Files
 OBJS        = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
-# Detect OS for specific flags
+# Detect OS
 UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
-    # Linux specific flags if needed
-endif
-ifeq ($(UNAME_S),Darwin)
-    # macOS specific flags if needed
-endif
+# (OS specific flags can go here)
 
 # --- WASM Configuration ---
 EMCC = emcc
 WASM_OUT = libkyu.js
-# WASM Flags
+# Note: We keep -Iinclude so WASM build finds headers
 WASM_FLAGS = -O3 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
              -s MODULARIZE=1 -s EXPORT_ES6=1 \
-	     -s ALLOW_TABLE_GROWTH=1 \
+             -s ALLOW_TABLE_GROWTH=1 \
              -s EXPORTED_FUNCTIONS='["_kyu_init", "_kyu_push", "_kyu_pull", "_malloc", "_free", "_kyu_get_sizeof_context"]' \
              -s EXPORTED_RUNTIME_METHODS='["cwrap", "getValue", "setValue", "HEAPU8", "addFunction", "removeFunction"]'
 
-
-
 # --- Targets ---
 
-.PHONY: all release debug clean audit help dependencies fuzz
+.PHONY: all release debug clean audit help dependencies fuzz wasm
 
 all: release
 
-# Release Build: Optimized, stripped symbols
 release: CFLAGS += -O3 -march=native -DNDEBUG
 release: $(TARGET)
 
-# Debug Build: Symbols, no optimization
 debug: CFLAGS += -O0 -g -DDEBUG
 debug: $(TARGET)
 
-# Audit Build: ASan and UBSan enabled
 audit: CFLAGS += -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 audit: LDFLAGS += -fsanitize=address,undefined
 audit: $(TARGET)
 
-# Fuzzer Build: Uses afl-clang-fast with ASan
 fuzz: dependencies
-	@echo "  [FUZZ]  Compiling fuzzer with $(FUZZ_CC)..."
+	@echo "  [FUZZ]  Compiling fuzzer..."
 	@mkdir -p $(BUILD_DIR)
 	@$(FUZZ_CC) $(CFLAGS) -fsanitize=address,undefined -g $(FUZZ_SRCS) -o $(FUZZ_TARGET)
 	@echo "  [INFO]  Fuzzer compiled."
-	@echo "          Run with:"
-	@echo "          mkdir -p inputs && echo 'seed' > inputs/test.txt"
-	@echo "          afl-fuzz -i inputs -o outputs -- ./$(FUZZ_TARGET) @@"
 
-# Main Link Step
 $(TARGET): $(OBJS)
 	@echo "  [LINK]  $@"
 	@$(CC) $(OBJS) $(LDFLAGS) -o $@
 
-# Compile Step
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR) dependencies
 	@echo "  [CC]    $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-# Directory Creation
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
-# New WASM build target
-wasm: core.c archive.c monocypher.c
-	$(EMCC) $(WASM_FLAGS) $^ -o $(WASM_OUT) -Iinclude
-	@tsc --target es2020 --module esnext --lib es2020,dom kyu.ts
+# WASM Target
+# We depend on the files in src/ now
+wasm: $(SRC_DIR)/core.c $(SRC_DIR)/archive.c $(SRC_DIR)/monocypher.c
+	@echo "  [WASM]  Compiling to WebAssembly..."
+	$(EMCC) $(WASM_FLAGS) $^ -o $(WASM_OUT) -I$(INC_DIR)
+	@echo "  [TS]    Compiling TypeScript wrapper..."
+	@tsc --target es2020 --module esnext --lib es2020,dom $(SRC_DIR)/kyu.ts
 
 # --- Dependency Management ---
 
-# Smart Dependency Check:
-# Only runs vendor.sh if monocypher.c or monocypher.h are missing.
 dependencies:
 	@if [ ! -f "$(MONO_SRC)" ] || [ ! -f "$(MONO_HDR)" ]; then \
 		echo "  [DEP]   Monocypher missing. Running vendor.sh..."; \
-		./vendor.sh || { echo "Vendor script failed"; exit 1; }; \
+		./$(SCRIPT_DIR)/vendor.sh || { echo "Vendor script failed"; exit 1; }; \
 	fi
 
-# Force update of dependencies
 update-deps:
 	@echo "  [DEP]   Forcing dependency update..."; \
-	./vendor.sh
+	./$(SCRIPT_DIR)/vendor.sh
 
 # --- Utilities ---
 
 clean:
 	@echo "  [CLEAN] Removing build artifacts..."
 	@rm -rf $(BUILD_DIR) $(TARGET) $(TARGET).dSYM $(FUZZ_TARGET)
-	@rm -rf ./*.o
 	@rm -rf ./live
-	@rm libkyu.js
-	@rm libkyu.wasm
+	@rm -f libkyu.js libkyu.wasm
+	@rm -f *.js # Clean compiled TS files in src/
 	@rm -rf ./*.dSYM
-	@emcc --clear-cache
+	@emcc --clear-cache 2>/dev/null || true
 
-# Clean everything including vendored files
 distclean: clean
 	@echo "  [CLEAN] Removing vendored dependencies..."
 	@rm -f $(MONO_SRC) $(MONO_HDR)
 
 help:
 	@echo "Kyu Build System"
-	@echo "Targets:"
-	@echo "  make          - Build optimized binary (release)"
-	@echo "  make debug    - Build with debug symbols"
-	@echo "  make audit    - Build with ASan/UBSan"
-	@echo "  make fuzz     - Build the fuzzer using afl-clang-fast"
-	@echo "  make clean    - Remove binary and objects"
-	@echo "  make distclean- Remove binary, objects, AND downloaded dependencies"
-
-docs:
-	@echo "Building Doxygen docs..."
-	@mkdir -p docs/doxygen
-	@doxygen ./Doxyfile
-
+	@echo "  make          - Build release binary"
+	@echo "  make wasm     - Build WASM and TypeScript"
+	@echo "  make test     - Run tests via scripts/test.sh"

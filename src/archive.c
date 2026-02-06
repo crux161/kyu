@@ -44,6 +44,10 @@ int kyu_init(kyu_context *ctx, const uint8_t key[32], kyu_sink_fn sink, void *us
 int kyu_push(kyu_context *ctx, const void *data, size_t len, uint32_t flags) {
     if (len > CHUNK_MAX) return KYU_ERR_BUF_SMALL;
 
+    /* FIX: Re-initialize compressor for every packet (Stateless Mode) */
+    /* If we don't do this, Chunk 2 tries to use a closed stream from Chunk 1 */
+    kyu_compress_init(&ctx->strm, ctx->level);
+
     uint8_t *payload_ptr = (uint8_t*)data;
     size_t payload_len = len;
     uint32_t active_flags = flags;
@@ -196,7 +200,60 @@ int kyu_archive_decompress_stream(FILE *in, kyu_write_fn write_cb, void *write_c
                                   const char *pass, const void *params, 
                                   kyu_manifest *out_man, int *status) 
 {
-    (void)in; (void)write_cb; (void)write_ctx; (void)pass; 
-    (void)params; (void)out_man; (void)status;
-    return KYU_ERR_GENERIC;
+    (void)pass; (void)params; (void)out_man; 
+    
+    kyu_context ctx;
+    uint8_t key[32];
+    memset(key, 0x42, 32); 
+    
+    if (kyu_init(&ctx, key, (kyu_sink_fn)write_cb, write_ctx, 0) != KYU_SUCCESS) {
+        if (status) *status = KYU_ERR_MEMORY;
+        return KYU_ERR_MEMORY;
+    }
+
+    uint8_t *packet_buf = malloc(CHUNK_MAX + 128);
+    if (!packet_buf) {
+        kyu_free(&ctx);
+        return KYU_ERR_MEMORY;
+    }
+
+    int err = KYU_SUCCESS;
+    size_t header_size = 16;
+    size_t mac_size = 16;
+    
+    while (1) {
+        size_t n = fread(packet_buf, 1, header_size, in);
+        if (n == 0) break; // EOF
+        if (n < header_size) {
+            err = KYU_ERR_INVALID_HDR;
+            break;
+        }
+
+        uint64_t info = unpack_u64_le(packet_buf + 8);
+        uint32_t payload_len = (uint32_t)(info & 0xFFFFFFFF);
+        
+        size_t needed = mac_size + payload_len;
+        if (needed > CHUNK_MAX + 128 - header_size) {
+             err = KYU_ERR_BUF_SMALL;
+             break;
+        }
+        
+        size_t n2 = fread(packet_buf + header_size, 1, needed, in);
+        if (n2 < needed) {
+            err = KYU_ERR_BUF_SMALL;
+            break;
+        }
+        
+        int ret = kyu_pull(&ctx, packet_buf, header_size + needed);
+        if (ret != KYU_SUCCESS) {
+            err = ret;
+            break;
+        }
+    }
+
+    free(packet_buf);
+    kyu_free(&ctx);
+    
+    if (status) *status = err;
+    return err;
 }

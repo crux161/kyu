@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>Libkyu WASM Stream Demo</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="manifest" href="/site.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
+    <link rel="manifest" href="img/site.webmanifest">
     <style>
         body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; background: #111; color: #eee; }
         .container { border: 1px solid #333; padding: 2rem; border-radius: 8px; background: #222; }
@@ -27,7 +27,7 @@
         <p>Select a <code>.kyu</code> encrypted video file (XChaCha20 + LZ77).</p>
         
         <div class="controls">
-            <input type="file" id="fileInput" accept=".kyu">
+            <input type="file" id="fileInput" accept="*">
             <button id="playBtn" disabled>Decrypt & Play</button>
         </div>
 

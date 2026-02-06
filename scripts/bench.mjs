@@ -1,7 +1,8 @@
-import initLibKyu from './libkyu.js';
+import initLibKyu from '../libkyu.js';
 import { performance } from 'perf_hooks';
 
 async function runBenchmark() {
+    console.log("Loading libkyu WASM from ../libkyu.js ...");
     const Kyu = await initLibKyu();
     const CHUNK_SIZE = 65536; 
     const ITERATIONS = 1000;

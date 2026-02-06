@@ -16,6 +16,8 @@ libkyu.wasm
 *.ko
 *.obj
 *.elf
+*.mp4
+*.*.kyu
 
 # Linker output
 *.ilk

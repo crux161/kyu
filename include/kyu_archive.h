@@ -83,11 +83,14 @@ typedef struct {
 /* Alias for legacy driver */
 typedef kyu_context kyu_writer;
 
+
+
 /* --- API --- */
 int kyu_init(kyu_context *ctx, const uint8_t key[32], kyu_sink_fn sink, void *user_data, int level);
 int kyu_push(kyu_context *ctx, const void *data, size_t len, uint32_t flags);
 int kyu_pull(kyu_context *ctx, const void *packet, size_t packet_len);
 void kyu_free(kyu_context *ctx);
+int kyu_get_sizeof_context(void);
 
 /* --- Legacy Shims --- */
 kyu_writer* kyu_writer_init(FILE *out_stream, const char *password, const void *params, int level);

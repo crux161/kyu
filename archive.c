@@ -138,6 +138,10 @@ void kyu_free(kyu_context *ctx) {
     memset(ctx, 0, sizeof(kyu_context));
 }
 
+int kyu_get_sizeof_context(void) {
+	return sizeof(kyu_context);
+}
+
 /* --- Legacy Shim Implementation --- */
 
 kyu_writer* kyu_writer_init(FILE *out_stream, const char *password, const void *params, int level) {
